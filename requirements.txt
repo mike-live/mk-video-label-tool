@@ -1,0 +1,6 @@
+keyboard>=0.13
+matplotlib>=3.7
+numpy>=1.23
+opencv_python>=4.7
+pandas>=1.5
+pathlib2>=2.3
