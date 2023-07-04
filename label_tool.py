@@ -10,6 +10,7 @@ from resize_aspect import ResizeWithAspectRatio
 import textwrap
 import argparse
 from label_names import label_names
+import gc
 import time
 
 plt.ion()
@@ -26,6 +27,10 @@ def parse_command_line():
     parser.add_argument('--labels', dest='video_labels_file_name', metavar='Video labels', type=Path,
                         default=None,
                         help='Path to video labels file (CSV: frame,time,label)')
+    parser.add_argument('--cache-size', dest='cache_size', metavar='Cache size', type=str,
+                        default='20F',
+                        help='Cache size. Ex.: 1G, 5M, 100K, 1000F.\n' + \
+                             '(G - Gigabytes, M - Megabytes, K - Kilobytes, F - Max number of frames)')
     
     # parser.add_argument('--sum', dest='accumulate', action='store_const',
     #                     const=sum, default=max,
@@ -34,21 +39,35 @@ def parse_command_line():
 
 def logger(func):
     def make_log(*arg, **kwarg):
-        #print('Run', func.__name__)
+        
+        print('Run', func.__name__)
+        be = time.time()
         val = func(*arg, **kwarg)
-        #print('End', func.__name__)
+        en = time.time()
+        print('End', func.__name__)
+        print('Time elapsed:', en - be)
         return val
     return make_log
 
 class VideoLabeler:
-    def __init__(self, input_video_file_name, label_names, video_labels_file_name):
+    def __init__(self, input_video_file_name, label_names, video_labels_file_name, cache_size):
         self.input_video_file_name = input_video_file_name
         if video_labels_file_name is None:
             video_labels_file_name = input_video_file_name.parent / \
                 ('mk_labels_' + input_video_file_name.stem + '.csv')
         self.video_labels_file_name = video_labels_file_name
         self.label_names = label_names
-        
+        self.cache_size = cache_size.lower()
+        if self.cache_size.endswith('f'):
+            self.cache_max_frames = int(self.cache_size[:-1])
+        elif self.cache_size.endswith('k'):
+            self.cache_max_size = int(self.cache_size[:-1]) * 10 ** 3
+        elif self.cache_size.endswith('m'):
+            self.cache_max_size = int(self.cache_size[:-1]) * 10 ** 6
+        elif self.cache_size.endswith('g'):
+            self.cache_max_size = int(self.cache_size[:-1]) * 10 ** 9
+
+        self.is_plot = False
         keyboard.on_press_key("right", lambda _: self.next_frame())
         keyboard.on_press_key("left", lambda _: self.prev_frame())
         keyboard.on_press_key(" ", lambda _: self.toggle_play_video())
@@ -61,10 +80,24 @@ class VideoLabeler:
             keyboard.on_press_key(str(i), f)
         print(str(self.input_video_file_name))
         self.cap = cv2.VideoCapture(str(self.input_video_file_name))
+        ret, im = self.cap.read()
+        if not ret:
+            print('Video is unreadable')
+            quit()
+        if hasattr(self, 'cache_max_size'):
+            self.cache_max_frames = max(10, int(self.cache_max_size / im.size))
+        
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.cache_max_frames)
+        print(self.cache_max_frames)
+
         self.frame_cache = {}
         self.video_frame_id = -1
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.frame_sar = (self.cap.get(cv2.CAP_PROP_SAR_NUM), self.cap.get(cv2.CAP_PROP_SAR_DEN))
+        self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) * self.frame_sar[0] / self.frame_sar[1])
+        self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) # * self.frame_sar[1] / self.frame_sar[0])
+        print(self.frame_width, self.frame_height)
         print(self.num_frames)
         print(self.fps)
         print(self.cap)
@@ -83,7 +116,7 @@ class VideoLabeler:
     @logger
     def toggle_paint(self):
         self.is_paint_label ^= True
-        self.plot_frame()
+        self.is_plot = True
 
     @logger
     def paint_cur_label(self):
@@ -94,12 +127,12 @@ class VideoLabeler:
     @logger
     def next_frame(self):
         self.cur_frame = (self.cur_frame + 1) % self.num_frames
-        self.plot_frame()
+        self.is_plot = True
 
     @logger
     def prev_frame(self):
         self.cur_frame = (self.cur_frame - 1) % self.num_frames
-        self.plot_frame()
+        self.is_plot = True
     
     @logger
     def play_video(self):
@@ -122,15 +155,17 @@ class VideoLabeler:
     @logger
     def change_cur_label_video(self, label):
         self.cur_label = label
-        self.plot_frame()
+        self.is_plot = True
     
     @logger
     def load_labels(self):
         try:
             df = pd.read_csv(self.video_labels_file_name, index_col=None)
             self.labels = dict(zip(df['frame'], df['label']))
-            #print(self.labels)
-            self.last_label_t = df['frame'].max()
+            if len(df):
+                self.last_label_t = df['frame'].max()
+            else:
+                self.last_label_t = 0
         except:
             pass
 
@@ -140,7 +175,6 @@ class VideoLabeler:
         df['time'] = (df['frame'] / self.fps).apply('{:0.2f}'.format)
         
         if need_save or time.time() - self.prev_time_save > 5:
-            print(self.video_labels_file_name)
             df.to_csv(self.video_labels_file_name.with_suffix('.csv'), index=None)
             self.prev_time_save = time.time()
 
@@ -154,22 +188,13 @@ class VideoLabeler:
 
     @logger
     def get_frame(self):
-        if self.cur_frame in self.frame_cache:
-            return self.frame_cache[self.cur_frame]
-        self.video_frame_id = self.cur_frame
-        while not self.video_frame_id in self.frame_cache and self.cur_frame - self.video_frame_id < 20:
-            self.video_frame_id -= 1
-        self.video_frame_id = max(-1, self.video_frame_id)
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.video_frame_id)
-        while self.video_frame_id < self.cur_frame:
-            ret, frame = self.cap.read()
-            if ret:
-                self.video_frame_id += 1
-                self.frame_cache[self.video_frame_id] = frame
-            else:
-                break
-        if self.cur_frame in self.frame_cache:
-            return self.frame_cache[self.cur_frame]
+        if self.video_frame_id + 1 != self.cur_frame:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.cur_frame - 1)
+        frame = None
+        ret, frame = self.cap.read()
+        if ret:
+            self.video_frame_id = self.cur_frame
+            return frame.copy()
         else:
             return None
 
@@ -186,7 +211,7 @@ class VideoLabeler:
                         color,
                         thickness,
                         line_type)
-            y += line_height * 2
+            y += int(line_height * 1.7)
             
         return y
     @logger
@@ -201,8 +226,8 @@ class VideoLabeler:
             ('', ''),
             ('space', 'Play video' if not self.is_playing else 'Stop video'),
             ('t', 'Change burn label state'),
-            ('→', 'Next frame'),
-            ('←', 'Previous frame'),
+            ('->', 'Next frame'),
+            ('<-', 'Previous frame'),
             ('q', 'Quit'),
             ('s', 'Save current labels to file'),
             ('Info:', 'Labels are saved\nautomatically each 5 sec\nand backuped each 5 min')
@@ -244,31 +269,32 @@ class VideoLabeler:
         # else:
         #     IM.set_data(frame)
         cur_time = self.cur_frame / self.fps
-        
         im = frame.copy()
+        im = cv2.resize(im, (self.frame_width, self.frame_height))
         title = f'Frame: {self.cur_frame}. ' + \
                 f'Time: {int(cur_time) // 60:02d}:{cur_time % 60:05.2f}'
         frame = cv2.putText(
             im, title, (50, 50), 
             cv2.FONT_HERSHEY_SIMPLEX, 1, 
-            (255, 0, 0), 2, cv2.LINE_AA, False
+            (255, 255, 255), 2, cv2.LINE_AA, False
         )
         
         title = f'Label painter: {self.cur_label} '
         title += f'Label frame: {self.labels.get(self.cur_frame, -1)} | '
         title += f'{"Burn" if self.is_paint_label else "Skip"}'
+        textsize = cv2.getTextSize(title, cv2.FONT_HERSHEY_COMPLEX, 1, 2)[0]
         
         frame = cv2.putText(
-            frame, title, (1250, 50), 
+            frame, title, (frame.shape[1] - textsize[0] - 20, 50), 
             cv2.FONT_HERSHEY_SIMPLEX, 1, 
-            (255, 0, 0), 2, cv2.LINE_AA, False
+            (255, 255, 255), 2, cv2.LINE_AA, False
         )
         
         text = self.label_names.get(str(self.labels.get(self.cur_frame, -1)), 'None')
         textsize = cv2.getTextSize(text, cv2.FONT_HERSHEY_COMPLEX, 1, 2)[0]
 
-        textX = 975 - textsize[0] // 2
-        textY = 875 + textsize[1] // 2
+        textX = frame.shape[1] // 2 - textsize[0] // 2
+        textY = frame.shape[0] // 2 + textsize[1] // 2
         frame = cv2.putText(
             frame, text, (textX, textY), 
             cv2.FONT_HERSHEY_COMPLEX, 1, 
@@ -304,6 +330,9 @@ class VideoLabeler:
                     en = time.time()
                     dt_pause = max(0, 1 / self.fps - (en - be))
                     time.sleep(dt_pause)
+                elif self.is_plot:
+                    self.plot_frame()
+                    self.is_plot = False
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
         finally:    
@@ -314,6 +343,7 @@ if __name__ == '__main__':
     video_labeler = VideoLabeler(
         args.input_video_file_name, 
         label_names,
-        args.video_labels_file_name
+        args.video_labels_file_name,
+        args.cache_size
     )
     video_labeler.start()
