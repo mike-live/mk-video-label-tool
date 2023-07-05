@@ -9,9 +9,9 @@ from datetime import datetime
 from resize_aspect import ResizeWithAspectRatio
 import textwrap
 import argparse
-from label_names import label_names
 import gc
 import time
+import shutil
 
 plt.ion()
 
@@ -31,32 +31,43 @@ def parse_command_line():
                         default='20F',
                         help='Cache size. Ex.: 1G, 5M, 100K, 1000F.\n' + \
                              '(G - Gigabytes, M - Megabytes, K - Kilobytes, F - Max number of frames)')
-    
-    # parser.add_argument('--sum', dest='accumulate', action='store_const',
-    #                     const=sum, default=max,
-    #                     help='sum the integers (default: find the max)')
+    parser.add_argument('--label_names', dest='label_names_file_name', metavar='Label names', type=Path,
+                        default='label_names.csv',
+                        help='Path to label names file (CSV: digit,label)')
     return parser.parse_args()
 
 def logger(func):
     def make_log(*arg, **kwarg):
         
-        print('Run', func.__name__)
+        #print('Run', func.__name__)
         be = time.time()
         val = func(*arg, **kwarg)
         en = time.time()
-        print('End', func.__name__)
-        print('Time elapsed:', en - be)
+        #print('End', func.__name__)
+        #print('Time elapsed:', en - be)
         return val
     return make_log
 
 class VideoLabeler:
-    def __init__(self, input_video_file_name, label_names, video_labels_file_name, cache_size):
+    def __init__(self, input_video_file_name, label_names_file_name, video_labels_file_name, cache_size):
         self.input_video_file_name = input_video_file_name
         if video_labels_file_name is None:
             video_labels_file_name = input_video_file_name.parent / \
                 ('mk_labels_' + input_video_file_name.stem + '.csv')
         self.video_labels_file_name = video_labels_file_name
-        self.label_names = label_names
+        self.label_names_file_name = self.get_label_names_file_name()
+        if not self.label_names_file_name.is_file():
+            if Path(label_names_file_name).is_file():
+                shutil.copy(label_names_file_name, self.label_names_file_name)
+            else:
+                print('Please, specify file with label names (--label_names)')
+                quit()
+        else:
+            if Path(label_names_file_name).is_file():
+                print('Label names file already created for this video and it will be used:')
+                print(self.label_names_file_name)
+        self.load_label_names()
+        
         self.cache_size = cache_size.lower()
         if self.cache_size.endswith('f'):
             self.cache_max_frames = int(self.cache_size[:-1])
@@ -78,6 +89,7 @@ class VideoLabeler:
             def f(_, p=i):
                 return self.change_cur_label_video(p)
             keyboard.on_press_key(str(i), f)
+        print('Trying to read video file:')
         print(str(self.input_video_file_name))
         self.cap = cv2.VideoCapture(str(self.input_video_file_name))
         ret, im = self.cap.read()
@@ -88,21 +100,20 @@ class VideoLabeler:
             self.cache_max_frames = max(10, int(self.cache_max_size / im.size))
         
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.cache_max_frames)
-        print(self.cache_max_frames)
+        print('Cache max frames:', self.cache_max_frames)
 
-        self.frame_cache = {}
         self.video_frame_id = -1
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.frame_sar = (self.cap.get(cv2.CAP_PROP_SAR_NUM), self.cap.get(cv2.CAP_PROP_SAR_DEN))
         self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) * self.frame_sar[0] / self.frame_sar[1])
         self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) # * self.frame_sar[1] / self.frame_sar[0])
-        print(self.frame_width, self.frame_height)
-        print(self.num_frames)
-        print(self.fps)
-        print(self.cap)
-        print(self.cap.isOpened())
-
+        print('--- Video Info ---')
+        print('Frame aspect ratio:', self.frame_sar)
+        print('Width and Height:', self.frame_width, self.frame_height)
+        print('Num frames:', self.num_frames)
+        print('FPS of video file', self.fps)
+        
         self.is_quit = False
         self.is_playing = False
         self.is_paint_label = False
@@ -112,6 +123,10 @@ class VideoLabeler:
         self.last_label_t = 0
         self.prev_time_save = time.time()
         self.prev_time_backup = time.time()
+
+    def get_label_names_file_name(self):
+        return self.input_video_file_name.parent / \
+            ('mk_label_names_' + self.input_video_file_name.stem + '.csv')
 
     @logger
     def toggle_paint(self):
@@ -157,6 +172,22 @@ class VideoLabeler:
         self.cur_label = label
         self.is_plot = True
     
+    @logger
+    def load_label_names(self):
+        try:
+            df = pd.read_csv(self.label_names_file_name, index_col=None, dtype=str, keep_default_na=False)
+            if not set(df['digit']).issubset(set('0123456789')):
+                raise Exception('Digit column contains some non-digit values')
+            if not len(set(df['digit'])) == len(df['digit']):
+                raise Exception('Digit column contains duplicate values')
+            self.label_names = dict(zip(df['digit'], df['label']))
+        except Exception as e:
+            print('Trying to read label names file, but some problems occurs:')
+            print(self.label_names_file_name)
+            print(repr(e))
+            quit()
+
+
     @logger
     def load_labels(self):
         try:
@@ -226,18 +257,17 @@ class VideoLabeler:
             ('', ''),
             ('space', 'Play video' if not self.is_playing else 'Stop video'),
             ('t', 'Change burn label state'),
-            ('->', 'Next frame'),
+            ('→', 'Next frame'),
             ('<-', 'Previous frame'),
             ('q', 'Quit'),
             ('s', 'Save current labels to file'),
-            ('Info:', 'Labels are saved\nautomatically each 5 sec\nand backuped each 5 min')
+            ('Info:', 'Auto save: 5 sec')
         ]
         
         im = np.zeros((height, width, 3), dtype=np.uint8)
         x = 10
         y = 40
         for key, message in key_menu:
-            #text = f'{key}: {message}'
             im = cv2.putText(
                 im, key, (x, y), 
                 cv2.FONT_HERSHEY_COMPLEX, 1, 
@@ -252,22 +282,12 @@ class VideoLabeler:
                 (255, 255, 255), 2, cv2.LINE_AA
             )
         
-            # im = cv2.putText(
-            #     im, message, (x + textsize[0] + 30, y), 
-            #     cv2.FONT_HERSHEY_COMPLEX, 1, 
-            #     (255, 255, 255), 2, cv2.LINE_AA, False
-            # )
-            
         return im
 
     @logger
     def plot_frame(self):
         self.paint_cur_label()
         frame = self.get_frame()
-        # if IM is None:
-        #     IM = ax.imshow(frame)
-        # else:
-        #     IM.set_data(frame)
         cur_time = self.cur_frame / self.fps
         im = frame.copy()
         im = cv2.resize(im, (self.frame_width, self.frame_height))
@@ -342,7 +362,7 @@ if __name__ == '__main__':
     args = parse_command_line()
     video_labeler = VideoLabeler(
         args.input_video_file_name, 
-        label_names,
+        args.label_names_file_name,
         args.video_labels_file_name,
         args.cache_size
     )
