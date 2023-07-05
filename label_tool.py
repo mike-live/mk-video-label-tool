@@ -32,7 +32,7 @@ def parse_command_line():
                         help='Cache size. Ex.: 1G, 5M, 100K, 1000F.\n' + \
                              '(G - Gigabytes, M - Megabytes, K - Kilobytes, F - Max number of frames)')
     parser.add_argument('--label_names', dest='label_names_file_name', metavar='Label names', type=Path,
-                        default='label_names.csv',
+                        default='data\label_names.csv',
                         help='Path to label names file (CSV: digit,label)')
     return parser.parse_args()
 
