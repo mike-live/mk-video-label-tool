@@ -257,7 +257,7 @@ class VideoLabeler:
             ('', ''),
             ('space', 'Play video' if not self.is_playing else 'Stop video'),
             ('t', 'Change burn label state'),
-            ('→', 'Next frame'),
+            ('->', 'Next frame'),
             ('<-', 'Previous frame'),
             ('q', 'Quit'),
             ('s', 'Save current labels to file'),
