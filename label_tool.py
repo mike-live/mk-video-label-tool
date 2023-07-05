@@ -9,7 +9,6 @@ from datetime import datetime
 from resize_aspect import ResizeWithAspectRatio
 import textwrap
 import argparse
-import gc
 import time
 import shutil
 
@@ -39,12 +38,12 @@ def parse_command_line():
 def logger(func):
     def make_log(*arg, **kwarg):
         
-        #print('Run', func.__name__)
+        # print('Run', func.__name__)
         be = time.time()
         val = func(*arg, **kwarg)
         en = time.time()
-        #print('End', func.__name__)
-        #print('Time elapsed:', en - be)
+        # print('End', func.__name__)
+        # print('Time elapsed:', en - be)
         return val
     return make_log
 
@@ -91,6 +90,9 @@ class VideoLabeler:
         keyboard.on_press_key("s", lambda _: self.save_labels())
         keyboard.on_press_key("t", lambda _: self.toggle_paint())
 
+        keyboard.on_press_key("up", lambda _: self.increase_speed())
+        keyboard.on_press_key("down", lambda _: self.decrease_speed())
+
         for i in range(0, 10):
             def f(_, p=i):
                 return self.change_cur_label_video(p)
@@ -120,6 +122,7 @@ class VideoLabeler:
         print('Num frames:', self.num_frames)
         print('FPS of video file', self.fps)
         
+        self.speed = 1
         self.is_quit = False
         self.is_playing = False
         self.is_paint_label = False
@@ -134,6 +137,19 @@ class VideoLabeler:
         return self.input_video_file_name.parent / \
             ('mk_label_names_' + self.input_video_file_name.stem + '.csv')
 
+    def increase_speed(self):
+        if self.speed < 1:
+            self.speed = self.speed + 0.125
+        else:
+            self.speed = min(20, int(self.speed) + 1)
+
+    def decrease_speed(self):
+        if self.speed <= 1:
+            self.speed = max(0.125, self.speed - 0.125)
+        else:
+            self.speed = max(1, int(self.speed) - 1)
+
+
     @logger
     def toggle_paint(self):
         self.is_paint_label ^= True
@@ -146,8 +162,8 @@ class VideoLabeler:
         self.save_labels(need_save=False)
 
     @logger
-    def next_frame(self):
-        self.cur_frame = (self.cur_frame + 1) % self.num_frames
+    def next_frame(self, add_frames=1):
+        self.cur_frame = (self.cur_frame + add_frames) % self.num_frames
         self.is_plot = True
 
     @logger
@@ -225,7 +241,12 @@ class VideoLabeler:
 
     @logger
     def get_frame(self):
-        if self.video_frame_id + 1 != self.cur_frame:
+        if 0 < self.cur_frame - self.video_frame_id < 20:
+            while self.video_frame_id + 1 < self.cur_frame:
+                ret, frame = self.cap.read()
+                if ret:
+                    self.video_frame_id += 1
+        elif self.video_frame_id + 1 != self.cur_frame:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.cur_frame - 1)
         frame = None
         ret, frame = self.cap.read()
@@ -262,18 +283,20 @@ class VideoLabeler:
         key_menu += [
             ('', ''),
             ('space', 'Play video' if not self.is_playing else 'Stop video'),
-            ('t', 'Change burn label state'),
-            ('->', 'Next frame'),
-            ('<-', 'Previous frame'),
+            ('t', 'Toggle burn/skip label'),
+            ('Right', 'Next frame'),
+            ('Left', 'Previous frame'),
+            ('Up', 'Increase speed'),
+            ('Down ', 'Decrease speed'),
+            ('s', 'Save labels to file'),
             ('q', 'Quit'),
-            ('s', 'Save current labels to file'),
             ('Info:', 'Auto save: 5 sec')
         ]
         
         im = np.zeros((height, width, 3), dtype=np.uint8)
         x = 10
-        y = 40
-        for key, message in key_menu:
+        y = 30
+        for i, (key, message) in enumerate(key_menu):
             im = cv2.putText(
                 im, key, (x, y), 
                 cv2.FONT_HERSHEY_COMPLEX, 1, 
@@ -281,9 +304,9 @@ class VideoLabeler:
             )
             textsize = cv2.getTextSize(key, cv2.FONT_HERSHEY_COMPLEX, 1, 2)[0]
             if len(message) > 20:
-                message = "\n".join(textwrap.wrap(message, 20))
+                message = "\n".join(textwrap.wrap(message, 25))
             y = self.put_multiline_text(
-                im, message, (x + textsize[0] + 30, y), 
+                im, message, (x + (100 if i > len(self.label_names) + 1 else 20) + 30, y), 
                 cv2.FONT_HERSHEY_COMPLEX, 1, 
                 (255, 255, 255), 2, cv2.LINE_AA
             )
@@ -298,7 +321,7 @@ class VideoLabeler:
         im = frame.copy()
         im = cv2.resize(im, (self.frame_width, self.frame_height))
         title = f'Frame: {self.cur_frame}. ' + \
-                f'Time: {int(cur_time) // 60:02d}:{cur_time % 60:05.2f}'
+                f'Time: {int(cur_time) // 60:02d}:{cur_time % 60:05.2f}. Speed: {self.speed}x'
         frame = cv2.putText(
             im, title, (50, 50), 
             cv2.FONT_HERSHEY_SIMPLEX, 1, 
@@ -352,9 +375,10 @@ class VideoLabeler:
                 if self.is_playing:
                     be = time.time()
                     self.plot_frame()
-                    self.next_frame()
+                    self.next_frame(max(1, int(self.speed)))
                     en = time.time()
-                    dt_pause = max(0, 1 / self.fps - (en - be))
+                    #print(en - be, 1 / self.fps)
+                    dt_pause = max(0, 1 / self.fps / self.speed - (en - be))
                     time.sleep(dt_pause)
                 elif self.is_plot:
                     self.plot_frame()
