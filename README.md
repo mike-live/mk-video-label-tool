@@ -88,7 +88,13 @@ After labeling finished you can view video and check labels:
 
 # Authors
 
-Krivonosov Mikhail, Lobachevsky State University - *Implementation* - @mike-live
+Krivonosov Mikhail, Lobachevsky State University - *Implementation* - [@mike-live](https://github.com/mike-live)
+
+# Video examples
+
+Video example were obtained from the paper:
+
+Sotskov, V. P., Pospelov, N. A., Plusnin, V. V., & Anokhin, K. V. (2022). Calcium Imaging Reveals Fast Tuning Dynamics of Hippocampal Place Cells and CA1 Population Activity during Free Exploration Task in Mice. International Journal of Molecular Sciences, 23(2), 638. MDPI AG. http://dx.doi.org/10.3390/ijms23020638
 
 # License
 
