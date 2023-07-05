@@ -30,8 +30,10 @@ Available keys:
 - <kbd>t</kbd>: Change burn label state
 - <kbd>→</kbd>: Next frame
 - <kbd>←</kbd>: Previous frame
-- <kbd>q</kbd>: Quit
+- <kbd>↑</kbd>: Increase speed
+- <kbd>↓</kbd>: Decrease speed
 - <kbd>s</kbd>: Save current labels to file
+- <kbd>q</kbd>: Quit
 
 To choose class use digits <kbd>0-9</kbd>.
 
