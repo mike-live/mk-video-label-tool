@@ -13,6 +13,12 @@ pip install -r requirements.txt
 
 ### Run
 
+Full form:
+```
+python label_tool.py <video_name>
+```
+
+Simple example:
 ```
 python label_tool.py data\movie.mp4 
 ```
@@ -35,7 +41,7 @@ Here we show 3 main ways of using the MK Video Label Tool: labeling, viewing, in
 
 ### General labeling procedure
 
-0. Change label_names.py with your label classes (available only 0-9 digits as a key). Labels can be either english or russian. Use 0 as non-defined class.
+0. Change `data\label_names.csv` with your label classes (available only 0-9 digits as a key). Labels can be either english or russian. Use 0 as non-defined class. After the label tool is started it automatically makes copy of label names file to the same folder as video file and names it `mk_label_names_<video_name>.csv`.
 1. Run label_tool with particular video.
 2. Play video (<kbd>Space</kbd>) until you would like to change the class of current frame. Stop playing by <kbd>Space</kbd>.
 3. Using <kbd>←</kbd> and <kbd>→</kbd> precisely position starting frame of found event.
@@ -45,8 +51,10 @@ Here we show 3 main ways of using the MK Video Label Tool: labeling, viewing, in
 7. Using <kbd>←</kbd> and <kbd>→</kbd> precisely position finishing frame of found event.
 8. Choose label <kbd>0</kbd> as non-defined class.
 9. Play video (<kbd>Space</kbd>) until next event is started. Go to step 2 until the last frame or you want to interrupt (how to is explained in the next sections).
+10. Find resulting label file named `mk_labels_<video_name>.csv` in the same folder as video file. It will contains only labeled frames with corresponding time in the input video timeline and assigned label.
 
-Caution: After the last frame, video is restarting from the beggining automatically.  
+Caution: After the last frame, video is restarting from the beggining automatically.
+
 
 ### Saving labels
 
@@ -71,6 +79,12 @@ After labeling finished you can view video and check labels:
 1. Run label_tool with particular video.
 2. Play video (<kbd>Space</kbd>) and pause at any time.
 3. In the center of the frame the label name of the current frame is written.
+
+### Command line params
+
+- `--max_cache`: Cache size. Ex.: `1G`, `5M`, `100K`, `1000F`. (`G` - Gigabytes, `M` - Megabytes, `K` - Kilobytes, `F` - Max number of frames). `20F` - cache size max of 20 frames, `1G` - cache size less than 1 gigabyte, `5M` - cache size less than 5 megabytes, `100K` - cache size less than 100 kilobytes.
+- `--label_names`: Path to label names file (CSV: digit,label).
+- `--labels`: Path to video labels file (CSV: frame,time,label).
 
 # Authors
 
