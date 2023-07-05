@@ -245,12 +245,14 @@ class VideoLabeler:
             while self.video_frame_id + 1 < self.cur_frame:
                 ret, frame = self.cap.read()
                 if ret:
+                    self.paint_cur_label()  
                     self.video_frame_id += 1
         elif self.video_frame_id + 1 != self.cur_frame:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.cur_frame - 1)
         frame = None
         ret, frame = self.cap.read()
         if ret:
+            self.paint_cur_label()
             self.video_frame_id = self.cur_frame
             return frame.copy()
         else:
@@ -315,13 +317,13 @@ class VideoLabeler:
 
     @logger
     def plot_frame(self):
-        self.paint_cur_label()
         frame = self.get_frame()
         cur_time = self.cur_frame / self.fps
         im = frame.copy()
         im = cv2.resize(im, (self.frame_width, self.frame_height))
         title = f'Frame: {self.cur_frame}. ' + \
-                f'Time: {int(cur_time) // 60:02d}:{cur_time % 60:05.2f}. Speed: {self.speed}x'
+                f'Time: {int(cur_time) // 60:02d}:{cur_time % 60:05.2f}. ' + \
+                f'Speed: {self.speed}x. FPS: {self.estimated_fps:0.1f}'
         frame = cv2.putText(
             im, title, (50, 50), 
             cv2.FONT_HERSHEY_SIMPLEX, 1, 
@@ -366,23 +368,35 @@ class VideoLabeler:
         cv2.imshow('Frame', img)
 
     def start(self):
+        self.estimated_fps = 0
         try:
             self.load_labels()
             self.cur_frame = self.last_label_t
             self.plot_frame()
             self.plot_frame()
+            prv = None
             while not self.is_quit:
                 if self.is_playing:
                     be = time.time()
                     self.plot_frame()
                     self.next_frame(max(1, int(self.speed)))
                     en = time.time()
-                    #print(en - be, 1 / self.fps)
                     dt_pause = max(0, 1 / self.fps / self.speed - (en - be))
                     time.sleep(dt_pause)
+                    if prv is None:
+                        self.estimated_fps = self.speed / (time.time() - be)
+                    else:
+                        k = 0.9
+                        self.estimated_fps = self.estimated_fps * (1 - k) + k * self.speed / (be - prv)
+                    prv = be
                 elif self.is_plot:
                     self.plot_frame()
                     self.is_plot = False
+                    self.estimated_fps = 0
+                    prv = None
+                else:
+                    self.estimated_fps = 0
+                    prv = None
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
         finally:    
