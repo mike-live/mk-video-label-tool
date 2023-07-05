@@ -79,12 +79,18 @@ class VideoLabeler:
             self.cache_max_size = int(self.cache_size[:-1]) * 10 ** 9
 
         self.is_plot = False
+        
+        keyboard.on_press_key("n", lambda _: self.next_frame())
+        keyboard.on_press_key("p", lambda _: self.prev_frame())
+
         keyboard.on_press_key("right", lambda _: self.next_frame())
         keyboard.on_press_key("left", lambda _: self.prev_frame())
+
         keyboard.on_press_key(" ", lambda _: self.toggle_play_video())
         keyboard.on_press_key("q", lambda _: self.quit_video())
         keyboard.on_press_key("s", lambda _: self.save_labels())
         keyboard.on_press_key("t", lambda _: self.toggle_paint())
+
         for i in range(0, 10):
             def f(_, p=i):
                 return self.change_cur_label_video(p)
@@ -203,8 +209,8 @@ class VideoLabeler:
     @logger
     def save_labels(self, need_save=True):
         df = pd.DataFrame(self.labels.items(), columns=['frame', 'label'])
-        df['time'] = (df['frame'] / self.fps).apply('{:0.2f}'.format)
-        
+        df['time'] = (df['frame'] / self.fps).apply('{:0.15f}'.format)
+        df = df.sort_values(by=['frame'])
         if need_save or time.time() - self.prev_time_save > 5:
             df.to_csv(self.video_labels_file_name.with_suffix('.csv'), index=None)
             self.prev_time_save = time.time()
